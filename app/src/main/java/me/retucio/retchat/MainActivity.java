@@ -1,6 +1,7 @@
 package me.retucio.retchat;
 
 import android.annotation.SuppressLint;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.inputmethod.EditorInfo;
 import android.widget.*;
@@ -8,6 +9,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import java.net.UnknownHostException;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 
@@ -18,12 +20,19 @@ public class MainActivity extends AppCompatActivity {
     private RecyclerView recycler;
     private EditText msgField;
 
-    private static final Pattern USER_MSG_PATTERN = Pattern.compile("^\\[([^\\]]+)\\]\\s+(.*)$");
+    private SharedPreferences prefs;
+    private static final String PREF_NAME = "retchat_prefs";
+    private static final String KEY_NICKNAME = "usuario";
+    private static final String KEY_ROOM = "lobby";
+
+    private static final Pattern USER_MSG_PATTERN = Pattern.compile("^\\[([^]]+)]\\s+(.*)$");
 
     @SuppressLint("SetTextI18n")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -75,10 +84,25 @@ public class MainActivity extends AppCompatActivity {
                     runOnUiThread(() -> {
                         String msg = rawMsg.trim();
                         if (msg.startsWith("[SERVER]")) {
-                            addSystemMessage(msg.substring(8).trim(), false);
+                            String serverMsg = msg.substring(8).trim();
+                            if (serverMsg.startsWith("ahora eres ")) {
+                                String newNick = serverMsg.substring(11).replace(".", "").trim();
+                                if (!newNick.isEmpty()) {
+                                    saveNickname(newNick);
+                                }
+                            }
+                            else if (serverMsg.startsWith("ahora estás en la sala \"")) {
+                                String newRoom = serverMsg.substring(25);
+                                int endIdx = newRoom.indexOf("\"");
+                                if (endIdx > 0) {
+                                    newRoom = newRoom.substring(0, endIdx);
+                                    saveRoom(newRoom);
+                                }
+                            }
+                            addSystemMessage(serverMsg, false);
                             return;
                         }
-                        java.util.regex.Matcher m = USER_MSG_PATTERN.matcher(msg);
+                        Matcher m = USER_MSG_PATTERN.matcher(msg);
                         if (m.matches()) {
                             String nickname = m.group(1);
                             String text = m.group(2);
@@ -101,6 +125,17 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     conn.connect(ip, port);
                     runOnUiThread(() -> addSystemMessage("connected to " + ip + ":" + port, false));
+
+                    String savedNick = prefs.getString(KEY_NICKNAME, null);
+                    String savedRoom = prefs.getString(KEY_ROOM, null);
+
+                    if (savedNick != null && !savedNick.isEmpty()) {
+                        conn.send("/nick " + savedNick);
+                    }
+                    if (savedRoom != null && !savedRoom.isEmpty() && !savedRoom.equals("lobby")) {
+                        Thread.sleep(200);
+                        conn.send("/join " + savedRoom);
+                    }
                 } catch (UnknownHostException e) {
                     runOnUiThread(() -> addSystemMessage("cannot resolve host: " + ip, true));
                 } catch (Exception e) {
@@ -110,7 +145,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         Runnable sendAction = () -> {
-            if (conn == null) {
+            if (conn == null || !conn.isRunning()) {
                 addSystemMessage("not connected to any server", true);
                 return;
             }
@@ -145,6 +180,14 @@ public class MainActivity extends AppCompatActivity {
         ChatMessage sysMsg = new ChatMessage(text, isError, System.currentTimeMillis());
         adapter.addMessage(sysMsg);
         recycler.scrollToPosition(adapter.getItemCount() - 1);
+    }
+
+    private void saveNickname(String nick) {
+        prefs.edit().putString(KEY_NICKNAME, nick).apply();
+    }
+
+    private void saveRoom(String room) {
+        prefs.edit().putString(KEY_ROOM, room).apply();
     }
 
     @Override

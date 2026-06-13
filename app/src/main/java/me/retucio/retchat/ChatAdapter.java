@@ -49,9 +49,9 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         long now = System.currentTimeMillis();
         SimpleDateFormat sdf;
         if (isSameDay(now, timestamp)) {
-            return "today";
+            return "hoy";
         } else if (isSameDay(now - 24 * 60 * 60 * 1000, timestamp)) {
-            return "yesterday";
+            return "ayer";
         } else {
             sdf = new SimpleDateFormat("MMMM d, yyyy", Locale.getDefault());
             return sdf.format(new Date(timestamp));
@@ -100,8 +100,7 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             } else {
                 vh.senderText.setVisibility(View.GONE);
             }
-        } else if (holder instanceof SystemViewHolder) {
-            SystemViewHolder vh = (SystemViewHolder) holder;
+        } else if (holder instanceof SystemViewHolder vh) {
             vh.messageText.setText(msg.text);
             if (msg.isDateHeader) {
                 // date headers: bold, no error color

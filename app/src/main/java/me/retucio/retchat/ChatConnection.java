@@ -4,7 +4,6 @@ import java.io.*;
 import java.math.BigInteger;
 import java.net.*;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.MessageDigest;
@@ -230,5 +229,9 @@ public class ChatConnection {
         try {
             if (socket != null) socket.close();
         } catch (IOException ignored) {}
+    }
+
+    public boolean isRunning() {
+        return running;
     }
 }
