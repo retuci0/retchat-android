@@ -3,6 +3,8 @@ package me.retucio.retchat;
 public class PacketType {
 
     public static final byte HANDSHAKE      = 0x01;
+    public static final byte KEEPALIVE      = 0x02;
+    public static final byte KEEPALIVE_ACK  = 0x03;
     public static final byte NICK_REQUEST   = 0x10;
     public static final byte NICK_ACK       = 0x11;
     public static final byte NICK_NOTIFY    = 0x12;

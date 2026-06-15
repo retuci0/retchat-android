@@ -7,10 +7,18 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.MessageDigest;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 public class ChatConnection {
+
+    private static final int KEEPALIVE_INTERVAL_SEC = 30;
+    private static final int KEEPALIVE_TIMEOUT_SEC = 10;
 
     public interface MessageListener {
         void onConnected();
@@ -50,6 +58,11 @@ public class ChatConnection {
     private long recvCounter = 0;
     private final MessageListener listener;
     private volatile boolean running;
+    private long lastReceiveTime;
+    private long lastKeepAliveSent;
+    private boolean waitingForAck;
+    private ScheduledExecutorService scheduler;
+    private ScheduledFuture<?> keepAliveTask;
 
     public ChatConnection(MessageListener listener) {
         this.listener = listener;
@@ -123,14 +136,59 @@ public class ChatConnection {
 
         sendCounter = 0;
         recvCounter = 0;
+        lastReceiveTime = System.currentTimeMillis();
+        waitingForAck = false;
         running = true;
+
+        startKeepAlive();
+
         new Thread(this::receiveLoop).start();
         listener.onConnected();
     }
 
+    private void startKeepAlive() {
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+        keepAliveTask = scheduler.scheduleWithFixedDelay(() -> {
+            if (!running) return;
+            long now = System.currentTimeMillis();
+            long idleMs = now - lastReceiveTime;
+
+            if (waitingForAck) {
+                // waited too long for ack
+                if (now - lastKeepAliveSent > KEEPALIVE_TIMEOUT_SEC * 1000L) {
+                    System.err.println("Keepalive timeout, disconnecting");
+                    disconnect();
+                }
+            } else if (idleMs > KEEPALIVE_INTERVAL_SEC * 1000L) {
+                try {
+                    sendKeepAlive();
+                } catch (Exception e) {
+                    disconnect();
+                }
+            }
+        }, KEEPALIVE_INTERVAL_SEC, KEEPALIVE_INTERVAL_SEC, TimeUnit.SECONDS);
+    }
+
+    private void sendKeepAlive() throws Exception {
+        sendPacket(PacketType.KEEPALIVE, new byte[0]);
+        waitingForAck = true;
+        lastKeepAliveSent = System.currentTimeMillis();
+    }
+
+    private void resetIdleTimer() {
+        lastReceiveTime = System.currentTimeMillis();
+    }
+
+
     public void disconnect() {
         running = false;
-        try { if (socket != null) socket.close(); } catch (IOException ignored) {}
+        if (keepAliveTask != null) keepAliveTask.cancel(false);
+        if (scheduler != null) scheduler.shutdown();
+        try {
+            if (socket != null) socket.close();
+        } catch (IOException ignored) {
+            // ignore
+        }
     }
 
     public boolean isRunning() { return running; }
@@ -158,14 +216,17 @@ public class ChatConnection {
     }
 
     public void sendNick(String newNick) throws Exception {
+        resetIdleTimer();
         byte[] payload = (newNick + "\0").getBytes(StandardCharsets.UTF_8);
         sendPacket(PacketType.NICK_REQUEST, payload);
     }
     public void sendJoin(String room) throws Exception {
+        resetIdleTimer();
         byte[] payload = (room + "\0").getBytes(StandardCharsets.UTF_8);
         sendPacket(PacketType.JOIN_REQUEST, payload);
     }
     public void sendChat(String text) throws Exception {
+        resetIdleTimer();
         byte[] payload = (text + "\0").getBytes(StandardCharsets.UTF_8);
         sendPacket(PacketType.CHAT_MSG, payload);
     }
@@ -197,6 +258,7 @@ public class ChatConnection {
                 hmac.init(keySpec);
                 byte[] expected = hmac.doFinal(ciphertext);
                 if (!MessageDigest.isEqual(recvHmac, expected)) continue;
+                resetIdleTimer();
                 xorCrypt(ciphertext, recvCounter);
                 recvCounter++;
                 // parse packet
@@ -217,6 +279,19 @@ public class ChatConnection {
     private void handlePacket(byte type, byte[] payload) {
         int[] offset = { 0 };
         switch (type) {
+            case PacketType.KEEPALIVE: {
+                // reply with ack
+                try {
+                    sendPacket(PacketType.KEEPALIVE_ACK, new byte[0]);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                break;
+            }
+            case PacketType.KEEPALIVE_ACK: {
+                waitingForAck = false;
+                break;
+            }
             case PacketType.NICK_ACK: {
                 String nick = readString(payload, offset);
                 listener.onNickChanged(nick);
