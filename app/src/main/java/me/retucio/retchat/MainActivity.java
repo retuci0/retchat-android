@@ -8,191 +8,242 @@ import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import java.net.UnknownHostException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 
-public class MainActivity extends AppCompatActivity {
+@SuppressLint("SetTextI18n")
+public class MainActivity extends AppCompatActivity implements ChatConnection.MessageListener {
 
     private ChatConnection conn;
     private ChatAdapter adapter;
     private RecyclerView recycler;
     private EditText msgField;
-
     private SharedPreferences prefs;
     private static final String PREF_NAME = "retchat_prefs";
-    private static final String KEY_NICKNAME = "usuario";
-    private static final String KEY_ROOM = "lobby";
+    private static final String KEY_IP = "last_ip";
+    private static final String KEY_PORT = "last_port";
+    private static final String KEY_NICKNAME = "last_nickname";
+    private static final String KEY_ROOM = "last_room";
 
-    private static final Pattern USER_MSG_PATTERN = Pattern.compile("^\\[([^]]+)]\\s+(.*)$");
+    private LinearLayout connectPanel;
+    private EditText ipField, portField;
+    private Button connectBtn;
+    private TextView statusNick, statusRoom;
+    private String currentNick = "", currentRoom = "lobby";
 
-    @SuppressLint("SetTextI18n")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
         prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        buildUI();
 
+        String savedIp = prefs.getString(KEY_IP, "retucio.me");
+        int savedPort = prefs.getInt(KEY_PORT, 6677);
+        ipField.setText(savedIp);
+        portField.setText(String.valueOf(savedPort));
+        doConnect(savedIp, savedPort);
+    }
+
+    private void buildUI() {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFF1A1A1A);
 
-        LinearLayout topRow = new LinearLayout(this);
-        EditText ipField = new EditText(this);
-        ipField.setHint("ip address");
-        ipField.setText("retucio.me");
-        EditText portField = new EditText(this);
-        portField.setHint("port");
-        portField.setText("6677");
-        Button connectBtn = new Button(this);
-        connectBtn.setText("connect");
-        topRow.addView(ipField, new LinearLayout.LayoutParams(0, -2, 2));
-        topRow.addView(portField, new LinearLayout.LayoutParams(0, -2, 1));
-        topRow.addView(connectBtn, new LinearLayout.LayoutParams(-2, -2));
+        // header bar
+        LinearLayout headerBar = new LinearLayout(this);
+        headerBar.setOrientation(LinearLayout.HORIZONTAL);
+        headerBar.setPadding(dp(12), dp(8), dp(8), dp(8));
+        statusNick = new TextView(this);
+        statusNick.setText("nick: ?");
+        statusNick.setTextColor(0xFF9E9E9E);
+        statusRoom = new TextView(this);
+        statusRoom.setText("sala: lobby");
+        statusRoom.setTextColor(0xFF9E9E9E);
+        headerBar.addView(statusNick, new LinearLayout.LayoutParams(0, -2, 1));
+        headerBar.addView(statusRoom, new LinearLayout.LayoutParams(0, -2, 1));
 
+        // connect panel
+        connectPanel = new LinearLayout(this);
+        connectPanel.setOrientation(LinearLayout.HORIZONTAL);
+        connectPanel.setPadding(dp(12), dp(8), dp(12), dp(8));
+        ipField = new EditText(this);
+        ipField.setHint("ip");
+        portField = new EditText(this);
+        portField.setHint("puerto");
+        connectBtn = new Button(this);
+        connectBtn.setText("conectar");
+        connectBtn.setOnClickListener(v -> {
+            String ip = ipField.getText().toString().trim();
+            int port = Integer.parseInt(portField.getText().toString().trim());
+            prefs.edit().putString(KEY_IP, ip).putInt(KEY_PORT, port).apply();
+            doConnect(ip, port);
+        });
+        connectPanel.addView(ipField, new LinearLayout.LayoutParams(0, -2, 2));
+        connectPanel.addView(portField, new LinearLayout.LayoutParams(0, -2, 1));
+        connectPanel.addView(connectBtn, new LinearLayout.LayoutParams(-2, -2));
+
+        // chat list
         recycler = new RecyclerView(this);
         adapter = new ChatAdapter();
         recycler.setLayoutManager(new LinearLayoutManager(this));
         recycler.setAdapter(adapter);
+        recycler.setBackgroundColor(0xFF1A1A1A);
 
-        LinearLayout bottomRow = new LinearLayout(this);
+        // input row
+        LinearLayout inputRow = new LinearLayout(this);
+        inputRow.setOrientation(LinearLayout.HORIZONTAL);
+        inputRow.setPadding(dp(8), dp(4), dp(8), dp(4));
         msgField = new EditText(this);
-        msgField.setHint("message or /command");
-        Button sendBtn = new Button(this);
-        sendBtn.setText("send");
-        bottomRow.addView(msgField, new LinearLayout.LayoutParams(0, -2, 1));
-        bottomRow.addView(sendBtn, new LinearLayout.LayoutParams(-2, -2));
-
-        root.addView(topRow, new LinearLayout.LayoutParams(-1, -2));
-        root.addView(recycler, new LinearLayout.LayoutParams(-1, 0, 1));
-        root.addView(bottomRow, new LinearLayout.LayoutParams(-1, -2));
-        setContentView(root);
-
-        connectBtn.setOnClickListener(v -> {
-            String ip = ipField.getText().toString().trim();
-            int port;
-            try {
-                port = Integer.parseInt(portField.getText().toString().trim());
-            } catch (NumberFormatException e) {
-                addSystemMessage("invalid port number", true);
-                return;
-            }
-
-            conn = new ChatConnection(new ChatConnection.MessageListener() {
-                @Override
-                public void onMessage(String rawMsg) {
-                    runOnUiThread(() -> {
-                        String msg = rawMsg.trim();
-                        if (msg.startsWith("[SERVER]")) {
-                            String serverMsg = msg.substring(8).trim();
-                            if (serverMsg.startsWith("ahora eres ")) {
-                                String newNick = serverMsg.substring(11).replace(".", "").trim();
-                                if (!newNick.isEmpty()) {
-                                    saveNickname(newNick);
-                                }
-                            }
-                            else if (serverMsg.startsWith("ahora estás en la sala \"")) {
-                                String newRoom = serverMsg.substring(25);
-                                int endIdx = newRoom.indexOf("\"");
-                                if (endIdx > 0) {
-                                    newRoom = newRoom.substring(0, endIdx);
-                                    saveRoom(newRoom);
-                                }
-                            }
-                            addSystemMessage(serverMsg, false);
-                            return;
-                        }
-                        Matcher m = USER_MSG_PATTERN.matcher(msg);
-                        if (m.matches()) {
-                            String nickname = m.group(1);
-                            String text = m.group(2);
-                            ChatMessage chatMsg = new ChatMessage(text, ChatMessage.Type.OTHER, nickname, System.currentTimeMillis());
-                            adapter.addMessage(chatMsg);
-                            recycler.scrollToPosition(adapter.getItemCount() - 1);
-                            return;
-                        }
-                        addSystemMessage(msg, false);
-                    });
-                }
-
-                @Override
-                public void onDisconnected() {
-                    runOnUiThread(() -> addSystemMessage("disconnected from server", false));
-                }
-            });
-
-            new Thread(() -> {
-                try {
-                    conn.connect(ip, port);
-                    runOnUiThread(() -> addSystemMessage("connected to " + ip + ":" + port, false));
-
-                    String savedNick = prefs.getString(KEY_NICKNAME, null);
-                    String savedRoom = prefs.getString(KEY_ROOM, null);
-
-                    if (savedNick != null && !savedNick.isEmpty()) {
-                        conn.send("/nick " + savedNick);
-                    }
-                    if (savedRoom != null && !savedRoom.isEmpty() && !savedRoom.equals("lobby")) {
-                        Thread.sleep(200);
-                        conn.send("/join " + savedRoom);
-                    }
-                } catch (UnknownHostException e) {
-                    runOnUiThread(() -> addSystemMessage("cannot resolve host: " + ip, true));
-                } catch (Exception e) {
-                    runOnUiThread(() -> addSystemMessage("connection error: " + e.getMessage(), true));
-                }
-            }).start();
-        });
-
-        Runnable sendAction = () -> {
-            if (conn == null || !conn.isRunning()) {
-                addSystemMessage("not connected to any server", true);
-                return;
-            }
-            String msg = msgField.getText().toString().trim();
-            if (msg.isEmpty()) return;
-            msgField.setText("");
-
-            ChatMessage selfMsg = new ChatMessage(msg, ChatMessage.Type.SELF, null, System.currentTimeMillis());
-            adapter.addMessage(selfMsg);
-            recycler.scrollToPosition(adapter.getItemCount() - 1);
-
-            new Thread(() -> {
-                try {
-                    conn.send(msg);
-                } catch (Exception e) {
-                    runOnUiThread(() -> addSystemMessage("failed to send message", true));
-                }
-            }).start();
-        };
-
-        sendBtn.setOnClickListener(v -> sendAction.run());
+        msgField.setHint("mensaje o /comando");
+        msgField.setSingleLine(true);
         msgField.setOnEditorActionListener((v, id, e) -> {
-            if (id == EditorInfo.IME_ACTION_SEND) {
-                sendAction.run();
-                return true;
-            }
-            return false;
+            if (id == EditorInfo.IME_ACTION_SEND) sendMessage();
+            return true;
         });
+        Button sendBtn = new Button(this);
+        sendBtn.setText("enviar");
+        sendBtn.setOnClickListener(v -> sendMessage());
+        inputRow.addView(msgField, new LinearLayout.LayoutParams(0, -2, 1));
+        inputRow.addView(sendBtn, new LinearLayout.LayoutParams(-2, -2));
+
+        root.addView(headerBar, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(connectPanel, new LinearLayout.LayoutParams(-1, -2));
+        root.addView(recycler, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(inputRow, new LinearLayout.LayoutParams(-1, -2));
+        setContentView(root);
     }
 
-    private void addSystemMessage(String text, boolean isError) {
-        ChatMessage sysMsg = new ChatMessage(text, isError, System.currentTimeMillis());
-        adapter.addMessage(sysMsg);
-        recycler.scrollToPosition(adapter.getItemCount() - 1);
+    private void doConnect(String ip, int port) {
+        if (conn != null) conn.disconnect();
+        conn = new ChatConnection(this);
+        new Thread(() -> {
+            try {
+                conn.connect(ip, port);
+            } catch (Exception e) {
+                runOnUiThread(() -> addSystemMessage("error de conexión: " + e.getMessage(), true));
+            }
+        }).start();
     }
 
-    private void saveNickname(String nick) {
-        prefs.edit().putString(KEY_NICKNAME, nick).apply();
+    private void sendMessage() {
+        if (conn == null || !conn.isRunning()) {
+            addSystemMessage("no conectado", true);
+            return;
+        }
+        String text = msgField.getText().toString().trim();
+        if (text.isEmpty()) return;
+        msgField.setText("");
+
+        if (text.startsWith("/nick ")) {
+            String nick = text.substring(6).trim();
+            new Thread(() -> {
+                try {
+                    conn.sendNick(nick);
+                } catch (Exception e) {
+                    runOnUiThread(() -> addSystemMessage("error al cambiar nick", true));
+                }
+            }).start();
+        }
+        else if (text.startsWith("/join ")) {
+            String room = text.substring(6).trim();
+            new Thread(() -> {
+                try {
+                    conn.sendJoin(room);
+                } catch (Exception e) {
+                    runOnUiThread(() -> addSystemMessage("error al unirse a la sala", true));
+                }
+            }).start();
+        }
+        else {
+            // normal chat message
+            adapter.addMessage(new ChatMessage(text, ChatMessage.Type.SELF, null, System.currentTimeMillis()));
+            scrollToBottom();
+            new Thread(() -> {
+                try {
+                    conn.sendChat(text);
+                } catch (Exception e) {
+                    runOnUiThread(() -> addSystemMessage("no se pudo enviar", true));
+                }
+            }).start();
+        }
     }
 
-    private void saveRoom(String room) {
-        prefs.edit().putString(KEY_ROOM, room).apply();
-    }
+
+    // --- callbacks ---
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (conn != null) conn.disconnect();
+    public void onConnected() {
+        runOnUiThread(() -> addSystemMessage("conectado", false));
+
+        String savedNick = prefs.getString(KEY_NICKNAME, null);
+        String savedRoom = prefs.getString(KEY_ROOM, null);
+
+        // Send nickname and join room in background
+        new Thread(() -> {
+            try {
+                if (savedNick != null && !savedNick.isEmpty()) {
+                    conn.sendNick(savedNick);
+                }
+                if (savedRoom != null && !savedRoom.isEmpty() && !savedRoom.equals("lobby")) {
+                    Thread.sleep(200);  // now safe (background thread)
+                    conn.sendJoin(savedRoom);
+                }
+            } catch (Exception ignored) {}
+        }).start();
     }
+
+    @Override public void onDisconnected() {
+        runOnUiThread(() -> addSystemMessage("desconectado", false));
+    }
+
+    @Override public void onSystemMessage(String text, boolean isError) {
+        runOnUiThread(() -> addSystemMessage(text, isError));
+    }
+
+    @Override public void onChatMessage(String sender, String text) {
+        runOnUiThread(() -> {
+            adapter.addMessage(new ChatMessage(text, ChatMessage.Type.OTHER, sender, System.currentTimeMillis()));
+            scrollToBottom();
+        });
+    }
+
+    @Override public void onNickChanged(String newNick) {
+        currentNick = newNick;
+        prefs.edit().putString(KEY_NICKNAME, newNick).apply();
+        runOnUiThread(() -> {
+            statusNick.setText("nick: " + newNick);
+            addSystemMessage("ahora eres " + newNick, false);
+        });
+    }
+
+    @Override public void onNickNotify(String oldNick, String newNick) {
+        runOnUiThread(() -> addSystemMessage(oldNick + " ahora es " + newNick, false));
+    }
+
+    @Override public void onRoomJoined(String roomName) {
+        currentRoom = roomName;
+        prefs.edit().putString(KEY_ROOM, roomName).apply();
+        runOnUiThread(() -> {
+            statusRoom.setText("sala: " + roomName);
+            addSystemMessage("te has unido a " + roomName, false);
+        });
+    }
+
+    @Override public void onUserJoined(String nick) {
+        runOnUiThread(() -> addSystemMessage(nick + " se ha unido", false));
+    }
+
+    @Override public void onUserLeft(String nick) {
+        runOnUiThread(() -> addSystemMessage(nick + " se ha ido", false));
+    }
+
+
+    // --- helpers ---
+
+    private void addSystemMessage(String text, boolean isError) {
+        adapter.addMessage(new ChatMessage(text, isError, System.currentTimeMillis()));
+        scrollToBottom();
+    }
+
+    private void scrollToBottom() { recycler.scrollToPosition(adapter.getItemCount() - 1); }
+    private int dp(int dp) { return (int) (dp * getResources().getDisplayMetrics().density); }
 }
