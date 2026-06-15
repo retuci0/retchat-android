@@ -350,4 +350,14 @@ public class ChatConnection {
         offset[0]++;
         return s;
     }
+
+    public String getIp() {
+        if (socket == null) return null;
+        return socket.getInetAddress().getHostAddress();
+    }
+
+    public int getPort() {
+        if (socket == null) return -1;
+        return socket.getPort();
+    }
 }

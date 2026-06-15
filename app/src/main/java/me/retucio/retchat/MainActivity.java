@@ -8,9 +8,12 @@ import android.view.animation.Animation;
 import android.view.animation.TranslateAnimation;
 import android.view.inputmethod.EditorInfo;
 import android.widget.*;
+
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
+
+import java.io.EOFException;
 
 
 @SuppressLint("SetTextI18n")
@@ -35,20 +38,22 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     private EditText ipField, portField;
     private Button connectBtn;
     private TextView statusNick, statusRoom;
+    private TextView toggleButton;
     private String currentNick = "", currentRoom = "lobby";
+
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
+        connectPanelExpanded = prefs.getBoolean(KEY_PANEL_EXPANDED, true);
         buildUI();
 
         String savedIp = prefs.getString(KEY_IP, "retucio.me");
-        connectPanelExpanded = prefs.getBoolean(KEY_PANEL_EXPANDED, true);
         int savedPort = prefs.getInt(KEY_PORT, 6677);
         ipField.setText(savedIp);
         portField.setText(String.valueOf(savedPort));
-        doConnect(savedIp, savedPort);
+        new Thread(() -> doConnect(savedIp, savedPort)).start();
     }
 
     private void buildUI() {
@@ -69,8 +74,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         statusRoom.setTextColor(0xFF9E9E9E);
 
         // connect panel toggle button
-        TextView toggleButton = new TextView(this);
-        toggleButton.setText("▼");
+        toggleButton = new TextView(this);
         toggleButton.setTextSize(18);
         toggleButton.setTextColor(0xFFBBBBBB);
         toggleButton.setPadding(dp(8), 0, dp(8), 0);
@@ -94,21 +98,41 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         connectBtn.setText("conectar");
         connectBtn.setOnClickListener(v -> {
             String ip = ipField.getText().toString().trim();
-            int port = Integer.parseInt(portField.getText().toString().trim());
-            prefs.edit().putString(KEY_IP, ip).putInt(KEY_PORT, port).apply();
-            doConnect(ip, port);
+            String portStr = portField.getText().toString().trim();
+            int port;
+
+            // validate address and port
+            try {
+                port = Integer.parseInt(portStr);
+                if (port < 0 || port > 65535) throw new NumberFormatException();
+            } catch (NumberFormatException e) {
+                addSystemMessage("puerto inválido.", true);
+                return;
+            }
+
+            new Thread(() -> {
+                // check if already connected to that server
+                if (conn != null && conn.isRunning() && ip.equals(conn.getIp()) && port == conn.getPort()) {
+                    runOnUiThread(() -> addSystemMessage("ya estás conectado a ese servidor!", true));
+                    return;
+                }
+
+                prefs.edit().putString(KEY_IP, ip).putInt(KEY_PORT, port).apply();
+                doConnect(ip, port);
+            }).start();
         });
         connectPanel.addView(ipField, new LinearLayout.LayoutParams(0, -2, 2));
         connectPanel.addView(portField, new LinearLayout.LayoutParams(0, -2, 1));
         connectPanel.addView(connectBtn, new LinearLayout.LayoutParams(-2, -2));
 
-        // --- input row ---
+        // --- chat list ---
         recycler = new RecyclerView(this);
         adapter = new ChatAdapter();
         recycler.setLayoutManager(new LinearLayoutManager(this));
         recycler.setAdapter(adapter);
         recycler.setBackgroundColor(0xFF1A1A1A);
 
+        // --- input row ---
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(LinearLayout.HORIZONTAL);
         inputRow.setPadding(dp(8), dp(4), dp(8), dp(4));
@@ -125,13 +149,19 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         inputRow.addView(msgField, new LinearLayout.LayoutParams(0, -2, 1));
         inputRow.addView(sendBtn, new LinearLayout.LayoutParams(-2, -2));
 
-
+        // add everything to root
         root.addView(headerBar, new LinearLayout.LayoutParams(-1, -2));
         root.addView(connectPanel, new LinearLayout.LayoutParams(-1, -2));
         root.addView(recycler, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(inputRow, new LinearLayout.LayoutParams(-1, -2));
 
         setContentView(root);
+
+        if (connectPanelExpanded) {
+            toggleButton.setText("▲");
+        } else {
+            toggleButton.setText("▼");
+        }
 
         toggleButton.setOnClickListener(v -> {
             if (connectPanelExpanded) {
@@ -156,27 +186,23 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             connectPanelExpanded = !connectPanelExpanded;
             prefs.edit().putBoolean(KEY_PANEL_EXPANDED, connectPanelExpanded).apply();
         });
-
-        // no animation initially
-        if (connectPanelExpanded) {
-            toggleButton.setText("▲");
-            connectPanel.setVisibility(View.VISIBLE);
-        } else {
-            toggleButton.setText("▼");
-            connectPanel.setVisibility(View.GONE);
-        }
     }
 
     private void doConnect(String ip, int port) {
         if (conn != null) conn.disconnect();
         conn = new ChatConnection(this);
-        new Thread(() -> {
-            try {
-                conn.connect(ip, port);
-            } catch (Exception e) {
-                runOnUiThread(() -> addSystemMessage("error de conexión: " + e.getMessage(), true));
-            }
-        }).start();
+        try {
+            conn.connect(ip, port);
+        } catch (EOFException e) {
+            runOnUiThread(() -> {
+                addSystemMessage("no se pudo conectar; puede que estés baneado", true);
+            });
+        } catch (Exception e) {
+            runOnUiThread(() -> {
+                addSystemMessage("error de conexión: " + e.getMessage(), true);
+                e.printStackTrace();
+            });
+        }
     }
 
     private void sendMessage() {
@@ -232,14 +258,13 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         String savedNick = prefs.getString(KEY_NICKNAME, null);
         String savedRoom = prefs.getString(KEY_ROOM, null);
 
-        // Send nickname and join room in background
         new Thread(() -> {
             try {
                 if (savedNick != null && !savedNick.isEmpty()) {
                     conn.sendNick(savedNick);
                 }
                 if (savedRoom != null && !savedRoom.isEmpty() && !savedRoom.equals("lobby")) {
-                    Thread.sleep(200);  // now safe (background thread)
+                    Thread.sleep(200);
                     conn.sendJoin(savedRoom);
                 }
             } catch (Exception ignored) {}
