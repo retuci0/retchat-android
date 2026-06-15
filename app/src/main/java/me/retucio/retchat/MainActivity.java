@@ -3,6 +3,9 @@ package me.retucio.retchat;
 import android.annotation.SuppressLint;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.view.View;
+import android.view.animation.Animation;
+import android.view.animation.TranslateAnimation;
 import android.view.inputmethod.EditorInfo;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
@@ -16,15 +19,19 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     private ChatConnection conn;
     private ChatAdapter adapter;
     private RecyclerView recycler;
-    private EditText msgField;
+
     private SharedPreferences prefs;
     private static final String PREF_NAME = "retchat_prefs";
     private static final String KEY_IP = "last_ip";
     private static final String KEY_PORT = "last_port";
     private static final String KEY_NICKNAME = "last_nickname";
     private static final String KEY_ROOM = "last_room";
+    private static final String KEY_PANEL_EXPANDED = "panel_expanded";
 
     private LinearLayout connectPanel;
+    private boolean connectPanelExpanded = true;
+
+    private EditText msgField;
     private EditText ipField, portField;
     private Button connectBtn;
     private TextView statusNick, statusRoom;
@@ -37,6 +44,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         buildUI();
 
         String savedIp = prefs.getString(KEY_IP, "retucio.me");
+        connectPanelExpanded = prefs.getBoolean(KEY_PANEL_EXPANDED, true);
         int savedPort = prefs.getInt(KEY_PORT, 6677);
         ipField.setText(savedIp);
         portField.setText(String.valueOf(savedPort));
@@ -48,23 +56,36 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(0xFF1A1A1A);
 
-        // header bar
+        // --- header bar ---
         LinearLayout headerBar = new LinearLayout(this);
         headerBar.setOrientation(LinearLayout.HORIZONTAL);
         headerBar.setPadding(dp(12), dp(8), dp(8), dp(8));
+
         statusNick = new TextView(this);
         statusNick.setText("nick: ?");
         statusNick.setTextColor(0xFF9E9E9E);
         statusRoom = new TextView(this);
         statusRoom.setText("sala: lobby");
         statusRoom.setTextColor(0xFF9E9E9E);
+
+        // connect panel toggle button
+        TextView toggleButton = new TextView(this);
+        toggleButton.setText("▼");
+        toggleButton.setTextSize(18);
+        toggleButton.setTextColor(0xFFBBBBBB);
+        toggleButton.setPadding(dp(8), 0, dp(8), 0);
+        toggleButton.setClickable(true);
+
         headerBar.addView(statusNick, new LinearLayout.LayoutParams(0, -2, 1));
         headerBar.addView(statusRoom, new LinearLayout.LayoutParams(0, -2, 1));
+        headerBar.addView(toggleButton, new LinearLayout.LayoutParams(-2, -2));
 
-        // connect panel
+        // --- connect panel ---
         connectPanel = new LinearLayout(this);
         connectPanel.setOrientation(LinearLayout.HORIZONTAL);
         connectPanel.setPadding(dp(12), dp(8), dp(12), dp(8));
+        connectPanel.setVisibility(connectPanelExpanded ? View.VISIBLE : View.GONE);
+
         ipField = new EditText(this);
         ipField.setHint("ip");
         portField = new EditText(this);
@@ -81,14 +102,13 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         connectPanel.addView(portField, new LinearLayout.LayoutParams(0, -2, 1));
         connectPanel.addView(connectBtn, new LinearLayout.LayoutParams(-2, -2));
 
-        // chat list
+        // --- input row ---
         recycler = new RecyclerView(this);
         adapter = new ChatAdapter();
         recycler.setLayoutManager(new LinearLayoutManager(this));
         recycler.setAdapter(adapter);
         recycler.setBackgroundColor(0xFF1A1A1A);
 
-        // input row
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(LinearLayout.HORIZONTAL);
         inputRow.setPadding(dp(8), dp(4), dp(8), dp(4));
@@ -105,11 +125,46 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         inputRow.addView(msgField, new LinearLayout.LayoutParams(0, -2, 1));
         inputRow.addView(sendBtn, new LinearLayout.LayoutParams(-2, -2));
 
+
         root.addView(headerBar, new LinearLayout.LayoutParams(-1, -2));
         root.addView(connectPanel, new LinearLayout.LayoutParams(-1, -2));
         root.addView(recycler, new LinearLayout.LayoutParams(-1, 0, 1));
         root.addView(inputRow, new LinearLayout.LayoutParams(-1, -2));
+
         setContentView(root);
+
+        toggleButton.setOnClickListener(v -> {
+            if (connectPanelExpanded) {
+                TranslateAnimation slideUp = new TranslateAnimation(0, 0, 0, -connectPanel.getHeight());
+                slideUp.setDuration(200);
+                slideUp.setAnimationListener(new Animation.AnimationListener() {
+                    @Override public void onAnimationStart(Animation a) {}
+                    @Override public void onAnimationEnd(Animation a) {
+                        connectPanel.setVisibility(View.GONE);
+                    }
+                    @Override public void onAnimationRepeat(Animation a) {}
+                });
+                connectPanel.startAnimation(slideUp);
+                toggleButton.setText("▼");
+            } else {
+                connectPanel.setVisibility(View.VISIBLE);
+                TranslateAnimation slideDown = new TranslateAnimation(0, 0, -connectPanel.getHeight(), 0);
+                slideDown.setDuration(200);
+                connectPanel.startAnimation(slideDown);
+                toggleButton.setText("▲");
+            }
+            connectPanelExpanded = !connectPanelExpanded;
+            prefs.edit().putBoolean(KEY_PANEL_EXPANDED, connectPanelExpanded).apply();
+        });
+
+        // no animation initially
+        if (connectPanelExpanded) {
+            toggleButton.setText("▲");
+            connectPanel.setVisibility(View.VISIBLE);
+        } else {
+            toggleButton.setText("▼");
+            connectPanel.setVisibility(View.GONE);
+        }
     }
 
     private void doConnect(String ip, int port) {
