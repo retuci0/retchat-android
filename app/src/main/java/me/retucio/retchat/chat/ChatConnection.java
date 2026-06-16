@@ -1,4 +1,4 @@
-package me.retucio.retchat;
+package me.retucio.retchat.chat;
 
 import java.io.*;
 import java.math.BigInteger;
@@ -15,6 +15,8 @@ import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
+import me.retucio.retchat.net.PacketType;
+
 public class ChatConnection {
 
     private static final int KEEPALIVE_INTERVAL_SEC = 30;
@@ -30,6 +32,9 @@ public class ChatConnection {
         void onRoomJoined(String roomName);
         void onUserJoined(String nick);
         void onUserLeft(String nick);
+        void onDirectMessage(String sender, String text);
+        void onKicked(String reason);
+        void onBanned(String reason);
     }
 
     private static final String DH_PRIME_HEX =
@@ -68,7 +73,7 @@ public class ChatConnection {
         this.listener = listener;
     }
 
-    // --- DH (same as before) ---
+    // --- DH ---
     private BigInteger generatePrivateKey() {
         SecureRandom rng = new SecureRandom();
         byte[] privBytes = new byte[32];
@@ -156,7 +161,7 @@ public class ChatConnection {
             if (waitingForAck) {
                 // waited too long for ack
                 if (now - lastKeepAliveSent > KEEPALIVE_TIMEOUT_SEC * 1000L) {
-                    System.err.println("Keepalive timeout, disconnecting");
+                    System.err.println("keepalive timeout, disconnecting");
                     disconnect();
                 }
             } else if (idleMs > KEEPALIVE_INTERVAL_SEC * 1000L) {
@@ -229,6 +234,11 @@ public class ChatConnection {
         resetIdleTimer();
         byte[] payload = (text + "\0").getBytes(StandardCharsets.UTF_8);
         sendPacket(PacketType.CHAT_MSG, payload);
+    }
+    public void sendDm(String targetNick, String text) throws Exception {
+        resetIdleTimer();
+        byte[] payload = (targetNick + "\0" + text + "\0").getBytes(StandardCharsets.UTF_8);
+        sendPacket(PacketType.DM_REQUEST, payload);
     }
 
     // --- receive loop ---
@@ -328,6 +338,24 @@ public class ChatConnection {
                 boolean isError = payload[offset[0]++] != 0;
                 String text = readString(payload, offset);
                 listener.onSystemMessage(text, isError);
+                break;
+            }
+            case PacketType.DM_MSG: {
+                String sender = readString(payload, offset);
+                String text = readString(payload, offset);
+                listener.onDirectMessage(sender, text);
+                break;
+            }
+            case PacketType.KICK: {
+                String reason = readString(payload, offset);
+                listener.onKicked(reason);
+                disconnect();
+                break;
+            }
+            case PacketType.BAN: {
+                String reason = readString(payload, offset);
+                listener.onBanned(reason);
+                disconnect();
                 break;
             }
             case PacketType.DISCONNECT: {

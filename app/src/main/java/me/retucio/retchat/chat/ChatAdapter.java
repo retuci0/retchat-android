@@ -1,4 +1,4 @@
-package me.retucio.retchat;
+package me.retucio.retchat.chat;
 
 import android.view.LayoutInflater;
 import android.view.View;
@@ -12,8 +12,13 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
+import me.retucio.retchat.MainActivity;
+import me.retucio.retchat.R;
+
 
 public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+
+    private final MainActivity activity;
 
     private static final int TYPE_SELF = 1;
     private static final int TYPE_OTHER = 2;
@@ -21,10 +26,20 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     private final List<ChatMessage> messages = new ArrayList<>();
 
+    public ChatAdapter(MainActivity act) {
+        this.activity = act;
+    }
+
     public void addMessage(ChatMessage msg) {
         maybeAddDateHeader(msg);
         messages.add(msg);
         notifyItemInserted(messages.size() - 1);
+    }
+
+    public void setMessages(List<ChatMessage> newMessages) {
+        messages.clear();
+        messages.addAll(newMessages);
+        notifyDataSetChanged();
     }
 
     private void maybeAddDateHeader(ChatMessage newMsg) {
@@ -49,9 +64,9 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         long now = System.currentTimeMillis();
         SimpleDateFormat sdf;
         if (isSameDay(now, timestamp)) {
-            return "hoy";
+            return activity.getString(R.string.today);
         } else if (isSameDay(now - 24 * 60 * 60 * 1000, timestamp)) {
-            return "ayer";
+            return activity.getString(R.string.yesterday);
         } else {
             sdf = new SimpleDateFormat("MMMM d, yyyy", Locale.getDefault());
             return sdf.format(new Date(timestamp));

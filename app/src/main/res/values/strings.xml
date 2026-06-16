@@ -1,3 +1,39 @@
 <resources>
     <string name="app_name">retchat</string>
+
+    <string name="nick">nick: %s</string>
+    <string name="room">sala: %s</string>
+    <string name="ip">ip</string>
+    <string name="port">puerto</string>
+    <string name="connect">conectar</string>
+    <string name="message_placeholder">mensaje o /comando</string>
+    <string name="send">enviar</string>
+    <string name="current_room">sala actual: %s</string>
+    <string name="dms">MENSAJES DIRECTOS</string>
+    <string name="dm_usage">uso: /dm &lt;nick&gt; &lt;mensaje&gt;</string>
+    <string name="dm_to">[DM a %s] %s</string>
+    <string name="dm_from">[DM de %s] %s</string>
+    <string name="dm">(DM) %s</string>
+    <string name="connected">conectado</string>
+    <string name="disconnected">desconectado</string>
+    <string name="youre_now">ahora eres "%s"</string>
+    <string name="is_now">%s ahora es %s</string>
+    <string name="youve_joined">ahora estás en "%s"</string>
+    <string name="joined">%s se ha unido.</string>
+    <string name="left">%s se ha pirado.</string>
+    <string name="today">hoy</string>
+    <string name="yesterday">ayer</string>
+
+    <string name="error_invalid_port">puerto inválido.</string>
+    <string name="error_already_connected">ya estás conectado a ese server!</string>
+    <string name="error_connection">error de conexión: %s</string>
+    <string name="error_EOF">no se pudo conectar; puede que estés baneado</string>
+    <string name="error_not_connected">no conectado</string>
+    <string name="error_nick">error al cambiar de nick</string>
+    <string name="error_join">error al cambiar de sala</string>
+    <string name="error_dm">error al enviar DM</string>
+    <string name="error_no_active_conv">no hay conversación activa</string>
+    <string name="error_send">no se pudo enviar</string>
+    <string name="error_kicked">has sido expulsado: %s</string>
+    <string name="error_banned">has sido baneado: %s</string>
 </resources>

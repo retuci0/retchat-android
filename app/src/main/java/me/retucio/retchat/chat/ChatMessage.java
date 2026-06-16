@@ -1,10 +1,10 @@
-package me.retucio.retchat;
+package me.retucio.retchat.chat;
 
 public class ChatMessage {
     public enum Type {
         SELF,       // own message (right bubble)
         OTHER,      // message from another user (left bubble)
-        SYSTEM      // system info/error (centered, italic, no bubble)
+        SYSTEM      // system info/error (centered, no bubble)
     }
 
     public final String  text;

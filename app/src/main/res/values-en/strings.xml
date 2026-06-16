@@ -1,0 +1,39 @@
+<resources>
+    <string name="app_name">retchat</string>
+
+    <string name="nick">nick: %s</string>
+    <string name="room">room: %s</string>
+    <string name="ip">ip</string>
+    <string name="port">port</string>
+    <string name="connect">connect</string>
+    <string name="message_placeholder">message or /command</string>
+    <string name="send">send</string>
+    <string name="current_room">current room: %s</string>
+    <string name="dms">DIRECT MESSAGES</string>
+    <string name="dm_usage">usage: /dm &lt;nick&gt; &lt;message&gt;</string>
+    <string name="dm_to">[DM to %s] %s</string>
+    <string name="dm_from">[DM from %s] %s</string>
+    <string name="dm">(DM) %s</string>
+    <string name="connected">connected</string>
+    <string name="disconnected">disconnected</string>
+    <string name="youre_now">you\'re now "%s"</string>
+    <string name="is_now">%s is now %s</string>
+    <string name="youve_joined">you\'ve joined "%s"</string>
+    <string name="joined">%s joined.</string>
+    <string name="left">%s left.</string>
+    <string name="today">today</string>
+    <string name="yesterday">yesterday</string>
+
+    <string name="error_invalid_port">invaliud port.</string>
+    <string name="error_already_connected">you\'re already connected to that server!</string>
+    <string name="error_connection">connection error: %s</string>
+    <string name="error_EOF">couldn\'t connect; you may be banned</string>
+    <string name="error_not_connected">not connected</string>
+    <string name="error_nick">error: couldn\'t change nick</string>
+    <string name="error_join">error: couldn\'t change rooms</string>
+    <string name="error_dm">error: couldn\'t send DM</string>
+    <string name="error_no_active_conv">there\'s no active conversation</string>
+    <string name="error_send">error: couldn\'t send</string>
+    <string name="error_kicked">you\'ve been kicked: %s</string>
+    <string name="error_banned">you\'ve been banned: %s</string>
+</resources>
