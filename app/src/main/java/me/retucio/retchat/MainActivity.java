@@ -1,7 +1,13 @@
 package me.retucio.retchat;
 
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.database.Cursor;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -9,7 +15,6 @@ import android.view.animation.Animation;
 import android.view.animation.TranslateAnimation;
 import android.view.inputmethod.EditorInfo;
 import android.widget.*;
-
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.GravityCompat;
@@ -17,14 +22,16 @@ import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
+import java.io.InputStream;
 import java.util.List;
 
 import me.retucio.retchat.chat.ChatAdapter;
-import me.retucio.retchat.chat.ChatConnection;
 import me.retucio.retchat.chat.ChatMessage;
 import me.retucio.retchat.chat.conversation.Conversation;
 import me.retucio.retchat.chat.conversation.ConversationManager;
+import me.retucio.retchat.net.ChatConnection;
 import me.retucio.retchat.net.SystemMessageCode;
 
 
@@ -42,6 +49,8 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     private static final String KEY_NICKNAME = "last_nickname";
     private static final String KEY_ROOM = "last_room";
     private static final String KEY_PANEL_EXPANDED = "panel_expanded";
+
+    private static final int REQUEST_IMAGE_PICK = 1;
 
     private LinearLayout connectPanel;
     private boolean connectPanelExpanded = true;
@@ -149,6 +158,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         // --- chat list ---
         recycler = new RecyclerView(this);
         adapter = new ChatAdapter(this);
+        adapter.setOnAfterInsert(this::scrollToBottom);
         convs = new ConversationManager();
         convs.setActiveConversation(convs.getOrCreateRoom("lobby"));
         recycler.setLayoutManager(new LinearLayoutManager(this));
@@ -159,6 +169,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         LinearLayout inputRow = new LinearLayout(this);
         inputRow.setOrientation(LinearLayout.HORIZONTAL);
         inputRow.setPadding(dp(8), dp(4), dp(8), dp(4));
+
         msgField = new EditText(this);
         msgField.setHint(getString(R.string.message_placeholder));
         msgField.setSingleLine(true);
@@ -166,10 +177,18 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             if (id == EditorInfo.IME_ACTION_SEND) sendMessage();
             return true;
         });
+
+        ImageButton attachButton = new ImageButton(this);
+        attachButton.setImageResource(android.R.drawable.ic_menu_gallery);
+        attachButton.setBackground(null);
+        attachButton.setOnClickListener(v -> openImagePicker());
+
         Button sendBtn = new Button(this);
         sendBtn.setText(getString(R.string.send));
         sendBtn.setOnClickListener(v -> sendMessage());
+
         inputRow.addView(msgField, new LinearLayout.LayoutParams(0, -2, 1));
+        inputRow.addView(attachButton, new LinearLayout.LayoutParams(-2, -2));
         inputRow.addView(sendBtn, new LinearLayout.LayoutParams(-2, -2));
 
         mainContent.addView(headerBar, new LinearLayout.LayoutParams(-1, -2));
@@ -251,6 +270,93 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         });
     }
 
+    private void openImagePicker() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivityForResult(Intent.createChooser(intent, "Select Image"), REQUEST_IMAGE_PICK);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_IMAGE_PICK && resultCode == RESULT_OK && data != null) {
+            Uri imageUri = data.getData();
+            if (imageUri == null) return;
+            try {
+                InputStream is = getContentResolver().openInputStream(imageUri);
+                byte[] imageBytes = readBytes(is);
+                if (is != null) is.close();
+                String mimeType = getContentResolver().getType(imageUri);
+                String fileName = getFileName(imageUri);
+
+                // compress of too large
+                if (imageBytes.length > 2 * 1024 * 1024) {
+                    BitmapFactory.Options options = new BitmapFactory.Options();
+                    options.inSampleSize = 2;
+                    Bitmap bmp = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.length, options);
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 80, baos);
+                    imageBytes = baos.toByteArray();
+                }
+
+                Conversation active = convs.getActiveConversation();
+                String target;
+                if (active != null && active.type == Conversation.Type.DM) {
+                    target = active.id;
+                } else {
+                    target = "";
+                }
+
+                byte[] finalImageBytes = imageBytes;
+                new Thread(() -> {
+                    try {
+                        conn.sendImage(target, mimeType, fileName, finalImageBytes);
+                    } catch (Exception e) {
+                        runOnUiThread(() -> addSystemMessage(getString(R.string.error_send_image), true));
+                    }
+                }).start();
+
+                // Add local self-message with image
+                ChatMessage selfMsg = new ChatMessage("", ChatMessage.Type.SELF, null,
+                        System.currentTimeMillis(), imageBytes, mimeType);
+                if (active != null) {
+                    convs.addMessageToConversation(active, selfMsg);
+                    adapter.addMessage(selfMsg);
+                    scrollToBottom();
+                }
+            } catch (Exception e) {
+                addSystemMessage(getString(R.string.error_reading_image), true);
+            }
+        }
+    }
+
+    private byte[] readBytes(InputStream is) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int len;
+        while ((len = is.read(buffer)) != -1) {
+            baos.write(buffer, 0, len);
+        }
+        return baos.toByteArray();
+    }
+
+    private String getFileName(Uri uri) {
+        String fileName = null;
+        if (uri.getScheme().equals("content")) {
+            try (Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (nameIndex != -1) fileName = cursor.getString(nameIndex);
+                }
+            }
+        }
+        if (fileName == null) fileName = uri.getLastPathSegment();
+        return fileName;
+    }
+
+    // --- rest of MainActivity (unchanged except add onImageMessage) ---
+
     private void switchToConversation(Conversation conv) {
         convs.setActiveConversation(conv);
         adapter.setMessages(conv.messages);
@@ -296,8 +402,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                     runOnUiThread(() -> addSystemMessage(getString(R.string.error_nick), true));
                 }
             }).start();
-        }
-        else if (text.startsWith("/join ")) {
+        } else if (text.startsWith("/join ")) {
             String room = text.substring(6).trim();
             new Thread(() -> {
                 try {
@@ -306,8 +411,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                     runOnUiThread(() -> addSystemMessage(getString(R.string.error_join), true));
                 }
             }).start();
-        }
-        else if (text.startsWith("/dm ")) {
+        } else if (text.startsWith("/dm ")) {
             String[] parts = text.substring(4).trim().split(" ", 2);
             if (parts.length < 2) {
                 addSystemMessage(getString(R.string.dm_usage), true);
@@ -330,8 +434,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                     runOnUiThread(() -> addSystemMessage(getString(R.string.error_dm), true));
                 }
             }).start();
-        }
-        else {
+        } else {
             Conversation active = convs.getActiveConversation();
             if (active == null) {
                 addSystemMessage(getString(R.string.error_no_active_conv), true);
@@ -366,7 +469,6 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         }
     }
 
-
     // --- MessageListener callbacks ---
 
     @Override
@@ -383,7 +485,9 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                     Thread.sleep(200);
                     conn.sendJoin(savedRoom);
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+                // empty catch block
+            }
         }).start();
     }
 
@@ -411,6 +515,36 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             ChatMessage msg = new ChatMessage(text, ChatMessage.Type.OTHER, sender, System.currentTimeMillis());
             convs.addMessageToConversation(roomConv, msg);
             if (convs.getActiveConversation() == roomConv) {
+                adapter.addMessage(msg);
+                scrollToBottom();
+            } else {
+                refreshSidePanel();
+            }
+        });
+    }
+
+    @Override
+    public void onImageMessage(String sender, String mimeType, String fileName, byte[] imageData) {
+        runOnUiThread(() -> {
+            // Determine target conversation: if sender is in a DM with us, route there; else room.
+            Conversation active = convs.getActiveConversation();
+            Conversation targetConv = null;
+            // Check if we have a DM with this sender
+            List<Conversation> dms = convs.getRecentDMs();
+            for (Conversation c : dms) {
+                if (c.id.equals(sender)) {
+                    targetConv = c;
+                    break;
+                }
+            }
+            if (targetConv == null) {
+                // treat as room message
+                targetConv = convs.getOrCreateRoom(currentRoom);
+            }
+            ChatMessage msg = new ChatMessage("", ChatMessage.Type.OTHER, sender,
+                    System.currentTimeMillis(), imageData, mimeType);
+            convs.addMessageToConversation(targetConv, msg);
+            if (convs.getActiveConversation() == targetConv) {
                 adapter.addMessage(msg);
                 scrollToBottom();
             } else {
@@ -504,23 +638,36 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     }
 
     private int getResourceIdForCode(int code) {
-        return switch (code) {
-            case SystemMessageCode.MSG_WELCOME ->               R.string.msg_1;
-            case SystemMessageCode.MSG_NICK_EMPTY ->            R.string.msg_2;
-            case SystemMessageCode.MSG_NICK_TOO_LONG ->         R.string.msg_3;
-            case SystemMessageCode.MSG_NICK_INVALID_CHARS ->    R.string.msg_4;
-            case SystemMessageCode.MSG_NICK_SAME ->             R.string.msg_5;
-            case SystemMessageCode.MSG_NICK_BANNED ->           R.string.msg_6;
-            case SystemMessageCode.MSG_NICK_TAKEN ->            R.string.msg_7;
-            case SystemMessageCode.MSG_JOIN_ALREADY ->          R.string.msg_8;
-            case SystemMessageCode.MSG_JOIN_NAME_TAKEN ->       R.string.msg_9;
-            case SystemMessageCode.MSG_DM_TARGET_NOT_FOUND ->   R.string.msg_10;
-            default -> 0;
-        };
+        switch (code) {
+            case SystemMessageCode.MSG_WELCOME:                return R.string.msg_1;
+            case SystemMessageCode.MSG_NICK_EMPTY:             return R.string.msg_2;
+            case SystemMessageCode.MSG_NICK_TOO_LONG:          return R.string.msg_3;
+            case SystemMessageCode.MSG_NICK_INVALID_CHARS:     return R.string.msg_4;
+            case SystemMessageCode.MSG_NICK_SAME:              return R.string.msg_5;
+            case SystemMessageCode.MSG_NICK_BANNED:            return R.string.msg_6;
+            case SystemMessageCode.MSG_NICK_TAKEN:             return R.string.msg_7;
+            case SystemMessageCode.MSG_JOIN_ALREADY:           return R.string.msg_8;
+            case SystemMessageCode.MSG_JOIN_NAME_TAKEN:        return R.string.msg_9;
+            case SystemMessageCode.MSG_DM_TARGET_NOT_FOUND:    return R.string.msg_10;
+            case SystemMessageCode.MSG_IMAGE_UNSUPPORTED:      return R.string.msg_11;
+            default: return 0;
+        }
     }
 
-    private void scrollToBottom() { recycler.post(() -> recycler.scrollToPosition(adapter.getItemCount() - 1)); }
     private int dp(int dp) { return (int) (dp * getResources().getDisplayMetrics().density); }
+
+    private void scrollToBottom() {
+        recycler.post(() -> {
+            int lastPos = adapter.getItemCount() - 1;
+            if (lastPos >= 0) {
+                recycler.smoothScrollToPosition(lastPos);
+            }
+        });
+    }
+
+    public RecyclerView getRecycler() {
+        return recycler;
+    }
 
     class DmListAdapter extends RecyclerView.Adapter<DmListAdapter.ViewHolder> {
         private List<Conversation> conversations;

@@ -36,6 +36,9 @@
     <string name="error_send">no se pudo enviar</string>
     <string name="error_kicked">has sido expulsado: %s</string>
     <string name="error_banned">has sido baneado: %s</string>
+    <string name="error_send_image">error al enviar imagen</string>
+    <string name="error_reading_image">error al leer imagen</string>
+    <string name="permission_denied">permisos de almacenamiento denegados.</string>
 
     <string name="msg_1">buenas %s, estás en %s.</string>
     <string name="msg_2">en nick no puede estar vacío.</string>
@@ -47,4 +50,5 @@
     <string name="msg_8">ya estás en esa sala.</string>
     <string name="msg_9">tu nick ya está cogido en esa sala.</string>
     <string name="msg_10">usuario "%s" no encontrado</string>
+    <string name="msg_11">tipo de imagen no soportado: %s</string>
 </resources>

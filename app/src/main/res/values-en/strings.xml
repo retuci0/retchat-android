@@ -36,6 +36,9 @@
     <string name="error_send">error: couldn\'t send</string>
     <string name="error_kicked">you\'ve been kicked: %s</string>
     <string name="error_banned">you\'ve been banned: %s</string>
+    <string name="error_send_image">failed to send image.</string>
+    <string name="error_reading_image">failed to read image.</string>
+    <string name="permission_denied">storage permission denied.</string>
 
     <string name="msg_1">welcome %s, you\'re in %s</string>
     <string name="msg_2">nick cannot be empty.</string>
@@ -47,4 +50,5 @@
     <string name="msg_8">you already are in that room.</string>
     <string name="msg_9">your nick is taken in that room.</string>
     <string name="msg_10">user "%s" not found</string>
+    <string name="msg_11">image type unsupported: %s</string>
 </resources>

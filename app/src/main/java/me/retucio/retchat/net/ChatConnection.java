@@ -1,12 +1,14 @@
-package me.retucio.retchat.chat;
+package me.retucio.retchat.net;
+
+import android.util.Log;
 
 import java.io.*;
 import java.math.BigInteger;
 import java.net.*;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -17,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
-import me.retucio.retchat.net.PacketType;
 
 public class ChatConnection {
 
@@ -35,6 +36,7 @@ public class ChatConnection {
         void onUserJoined(String nick);
         void onUserLeft(String nick);
         void onDirectMessage(String sender, String text);
+        void onImageMessage(String sender, String mimeType, String fileName, byte[] imageData);
         void onKicked(String reason);
         void onBanned(String reason);
     }
@@ -55,7 +57,7 @@ public class ChatConnection {
     private static final BigInteger DH_PRIME = new BigInteger(DH_PRIME_HEX, 16);
     private static final BigInteger DH_GENERATOR = BigInteger.valueOf(2);
     private static final int KEY_LENGTH = 32;
-    private static final int MAX_MSG_LEN = 4096;
+    private static final int MAX_MSG_LEN = 2 * 1024 * 1024;  // 2 MB
 
     private Socket socket;
     private DataInputStream in;
@@ -88,10 +90,20 @@ public class ChatConnection {
     private BigInteger computeSharedSecret(BigInteger peerPub, BigInteger priv) {
         return peerPub.modPow(priv, DH_PRIME);
     }
+
     private byte[] deriveBaseKey(BigInteger sharedSecret) throws Exception {
         byte[] secretBytes = sharedSecret.toByteArray();
-        if (secretBytes.length > 1 && secretBytes[0] == 0)
-            secretBytes = java.util.Arrays.copyOfRange(secretBytes, 1, secretBytes.length);
+        int start = 0;
+        while (start < secretBytes.length && secretBytes[start] == 0) {
+            start++;
+        }
+        if (start == secretBytes.length) {
+            secretBytes = new byte[]{0};
+        } else {
+            byte[] trimmed = new byte[secretBytes.length - start];
+            System.arraycopy(secretBytes, start, trimmed, 0, trimmed.length);
+            secretBytes = trimmed;
+        }
         MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
         return sha256.digest(secretBytes);
     }
@@ -161,9 +173,8 @@ public class ChatConnection {
             long idleMs = now - lastReceiveTime;
 
             if (waitingForAck) {
-                // waited too long for ack
                 if (now - lastKeepAliveSent > KEEPALIVE_TIMEOUT_SEC * 1000L) {
-                    System.err.println("keepalive timeout, disconnecting");
+                    Log.e("ChatConnection", "keepalive timeout, disconnecting");
                     disconnect();
                 }
             } else if (idleMs > KEEPALIVE_INTERVAL_SEC * 1000L) {
@@ -186,16 +197,13 @@ public class ChatConnection {
         lastReceiveTime = System.currentTimeMillis();
     }
 
-
     public void disconnect() {
         running = false;
         if (keepAliveTask != null) keepAliveTask.cancel(false);
         if (scheduler != null) scheduler.shutdown();
         try {
             if (socket != null) socket.close();
-        } catch (IOException ignored) {
-            // ignore
-        }
+        } catch (IOException ignored) { }
     }
 
     public boolean isRunning() { return running; }
@@ -215,6 +223,8 @@ public class ChatConnection {
         byte[] hmacBytes = hmac.doFinal(ciphertext);
         synchronized (out) {
             out.write(hmacBytes);
+            out.write((ciphertext.length >> 24) & 0xFF);
+            out.write((ciphertext.length >> 16) & 0xFF);
             out.write((ciphertext.length >> 8) & 0xFF);
             out.write(ciphertext.length & 0xFF);
             out.write(ciphertext);
@@ -243,6 +253,18 @@ public class ChatConnection {
         sendPacket(PacketType.DM_REQUEST, payload);
     }
 
+    public void sendImage(String target, String mimeType, String fileName, byte[] imageData) throws Exception {
+        resetIdleTimer();
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        baos.write(0);  // sender is empty, server will replace it
+        baos.write((target + "\0").getBytes(StandardCharsets.UTF_8));
+        baos.write((mimeType + "\0").getBytes(StandardCharsets.UTF_8));
+        baos.write((fileName + "\0").getBytes(StandardCharsets.UTF_8));
+        baos.write(imageData);
+        byte[] payload = baos.toByteArray();
+        sendPacket(PacketType.IMAGE_MSG, payload);
+    }
+
     // --- receive loop ---
     private void receiveLoop() {
         try {
@@ -256,7 +278,7 @@ public class ChatConnection {
                 }
                 if (hmacRead != 32) break;
 
-                int msgLen = in.readUnsignedShort();
+                int msgLen = in.readInt();
                 if (msgLen > MAX_MSG_LEN) break;
                 byte[] ciphertext = new byte[msgLen];
                 int total = 0;
@@ -267,19 +289,18 @@ public class ChatConnection {
                 }
                 if (total != msgLen) break;
 
-                long counter = recvCounter;
-                recvCounter++;
-
-                // verify HMAC
                 Mac hmac = Mac.getInstance("HmacSHA256");
                 SecretKeySpec keySpec = new SecretKeySpec(encKey, "HmacSHA256");
                 hmac.init(keySpec);
                 byte[] expected = hmac.doFinal(ciphertext);
 
                 if (!MessageDigest.isEqual(recvHmac, expected)) {
-                    continue;
+                    Log.e("ChatConnection", "HMAC verification failed, disconnecting");
+                    break;
                 }
 
+                long counter = recvCounter;
+                recvCounter++;
                 resetIdleTimer();
                 xorCrypt(ciphertext, counter);
 
@@ -300,7 +321,6 @@ public class ChatConnection {
         int[] offset = { 0 };
         switch (type) {
             case PacketType.KEEPALIVE: {
-                // reply with ack
                 try {
                     sendPacket(PacketType.KEEPALIVE_ACK, new byte[0]);
                 } catch (Exception e) {
@@ -362,6 +382,17 @@ public class ChatConnection {
                 listener.onDirectMessage(sender, text);
                 break;
             }
+            case PacketType.IMAGE_MSG: {
+                String sender = readString(payload, offset);
+                String target = readString(payload, offset);
+                String mimeType = readString(payload, offset);
+                String fileName = readString(payload, offset);
+                int dataLen = payload.length - offset[0];
+                byte[] imageData = new byte[dataLen];
+                System.arraycopy(payload, offset[0], imageData, 0, dataLen);
+                listener.onImageMessage(sender, mimeType, fileName, imageData);
+                break;
+            }
             case PacketType.KICK: {
                 String reason = readString(payload, offset);
                 listener.onKicked(reason);
@@ -378,13 +409,9 @@ public class ChatConnection {
                 disconnect();
                 break;
             }
+            default:
+                Log.e("ChatConnection", "unhandled packet type: " + String.format("0x%02X", type));
         }
-    }
-
-    private String readString(byte[] data, int start) {
-        int end = start;
-        while (end < data.length && data[end] != 0) end++;
-        return new String(data, start, end - start, StandardCharsets.UTF_8);
     }
 
     private String readString(byte[] data, int[] offset) {

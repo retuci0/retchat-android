@@ -19,6 +19,7 @@ public class PacketType {
     public static final byte SYSTEM_MSG     = 0x21;
     public static final byte DM_REQUEST     = 0x22;
     public static final byte DM_MSG         = 0x23;
+    public static final byte IMAGE_MSG      = 0x24;
 
     public static final byte DISCONNECT     = 0x30;
     public static final byte KICK           = 0x31;
