@@ -320,7 +320,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                     ChatMessage.Type.SELF, null, System.currentTimeMillis());
             convs.addMessageToConversation(dmConv, selfMsg);
             convs.setActiveConversation(dmConv);
-            adapter.setMessages(dmConv.messages);  // full switch — setMessages is correct here
+            adapter.setMessages(dmConv.messages);
             refreshSidePanel();
             scrollToBottom();
             new Thread(() -> {
@@ -519,7 +519,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         };
     }
 
-    private void scrollToBottom() { recycler.scrollToPosition(adapter.getItemCount() - 1); }
+    private void scrollToBottom() { recycler.post(() -> recycler.scrollToPosition(adapter.getItemCount() - 1)); }
     private int dp(int dp) { return (int) (dp * getResources().getDisplayMetrics().density); }
 
     class DmListAdapter extends RecyclerView.Adapter<DmListAdapter.ViewHolder> {
@@ -531,9 +531,15 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         @Override public int getItemCount() { return conversations == null ? 0 : conversations.size(); }
         @Override @NonNull public ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
             TextView tv = new TextView(parent.getContext());
+            tv.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+            ));
             tv.setPadding(dp(8), dp(8), dp(8), dp(8));
             tv.setTextColor(0xFFFFFFFF);
             tv.setBackgroundResource(android.R.drawable.list_selector_background);
+            tv.setClickable(true);
+            tv.setFocusable(true);
             return new ViewHolder(tv);
         }
         @Override public void onBindViewHolder(ViewHolder holder, int pos) {

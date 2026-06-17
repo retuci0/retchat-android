@@ -33,7 +33,7 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     public void addMessage(ChatMessage msg) {
         maybeAddDateHeader(msg);
         messages.add(msg);
-        notifyItemInserted(messages.size() - 1);
+        activity.runOnUiThread(() -> notifyItemInserted(messages.size() - 1));
     }
 
     public void setMessages(List<ChatMessage> newMessages) {
