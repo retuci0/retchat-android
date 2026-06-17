@@ -36,4 +36,15 @@
     <string name="error_send">no se pudo enviar</string>
     <string name="error_kicked">has sido expulsado: %s</string>
     <string name="error_banned">has sido baneado: %s</string>
+
+    <string name="msg_1">buenas %s, estás en %s.</string>
+    <string name="msg_2">en nick no puede estar vacío.</string>
+    <string name="msg_3">el nick no puede exceder los %s caracteres.</string>
+    <string name="msg_4">el nick solo puede contener letras, números, guion y guion bajo.</string>
+    <string name="msg_5">ya tienes ese nick.</string>
+    <string name="msg_6">ese nick está baneado.</string>
+    <string name="msg_7">ese nick ya está cogido.</string>
+    <string name="msg_8">ya estás en esa sala.</string>
+    <string name="msg_9">tu nick ya está cogido en esa sala.</string>
+    <string name="msg_10">usuario "%s" no encontrado</string>
 </resources>

@@ -13,7 +13,7 @@
     <string name="dm_usage">usage: /dm &lt;nick&gt; &lt;message&gt;</string>
     <string name="dm_to">[DM to %s] %s</string>
     <string name="dm_from">[DM from %s] %s</string>
-    <string name="dm">(DM) %s</string>
+    <string name="dm">[DM] %s</string>
     <string name="connected">connected</string>
     <string name="disconnected">disconnected</string>
     <string name="youre_now">you\'re now "%s"</string>
@@ -36,4 +36,15 @@
     <string name="error_send">error: couldn\'t send</string>
     <string name="error_kicked">you\'ve been kicked: %s</string>
     <string name="error_banned">you\'ve been banned: %s</string>
+
+    <string name="msg_1">welcome %s, you\'re in %s</string>
+    <string name="msg_2">nick cannot be empty.</string>
+    <string name="msg_3">nick can\'t exceed %s characters.</string>
+    <string name="msg_4">nick can only contain letters, numbers, underscore and dash.</string>
+    <string name="msg_5">you already have that nick.</string>
+    <string name="msg_6">that nick is banned.</string>
+    <string name="msg_7">that nick is already taken.</string>
+    <string name="msg_8">you already are in that room.</string>
+    <string name="msg_9">your nick is taken in that room.</string>
+    <string name="msg_10">user "%s" not found</string>
 </resources>

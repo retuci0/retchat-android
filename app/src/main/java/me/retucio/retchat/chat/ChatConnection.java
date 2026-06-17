@@ -7,6 +7,8 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -25,7 +27,7 @@ public class ChatConnection {
     public interface MessageListener {
         void onConnected();
         void onDisconnected();
-        void onSystemMessage(String text, boolean isError);
+        void onSystemMessage(int code, List<String> params, boolean isError);
         void onChatMessage(String sender, String text);
         void onNickChanged(String newNick);
         void onNickNotify(String oldNick, String newNick);
@@ -253,6 +255,7 @@ public class ChatConnection {
                     hmacRead += r;
                 }
                 if (hmacRead != 32) break;
+
                 int msgLen = in.readUnsignedShort();
                 if (msgLen > MAX_MSG_LEN) break;
                 byte[] ciphertext = new byte[msgLen];
@@ -263,15 +266,23 @@ public class ChatConnection {
                     total += r;
                 }
                 if (total != msgLen) break;
+
+                long counter = recvCounter;
+                recvCounter++;
+
+                // verify HMAC
                 Mac hmac = Mac.getInstance("HmacSHA256");
                 SecretKeySpec keySpec = new SecretKeySpec(encKey, "HmacSHA256");
                 hmac.init(keySpec);
                 byte[] expected = hmac.doFinal(ciphertext);
-                if (!MessageDigest.isEqual(recvHmac, expected)) continue;
+
+                if (!MessageDigest.isEqual(recvHmac, expected)) {
+                    continue;
+                }
+
                 resetIdleTimer();
-                xorCrypt(ciphertext, recvCounter);
-                recvCounter++;
-                // parse packet
+                xorCrypt(ciphertext, counter);
+
                 byte type = ciphertext[0];
                 byte[] payload = new byte[ciphertext.length - 1];
                 System.arraycopy(ciphertext, 1, payload, 0, payload.length);
@@ -279,8 +290,7 @@ public class ChatConnection {
             }
         } catch (Exception e) {
             e.printStackTrace();
-        }
-        finally {
+        } finally {
             running = false;
             listener.onDisconnected();
         }
@@ -336,8 +346,14 @@ public class ChatConnection {
             }
             case PacketType.SYSTEM_MSG: {
                 boolean isError = payload[offset[0]++] != 0;
-                String text = readString(payload, offset);
-                listener.onSystemMessage(text, isError);
+                int code = ((payload[offset[0]] & 0xFF) << 8) | (payload[offset[0] + 1] & 0xFF);
+                offset[0] += 2;
+                int paramCount = payload[offset[0]++] & 0xFF;
+                List<String> params = new ArrayList<>();
+                for (int i = 0; i < paramCount; i++) {
+                    params.add(readString(payload, offset));
+                }
+                listener.onSystemMessage(code, params, isError);
                 break;
             }
             case PacketType.DM_MSG: {

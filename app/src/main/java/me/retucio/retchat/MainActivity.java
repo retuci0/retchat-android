@@ -25,6 +25,7 @@ import me.retucio.retchat.chat.ChatConnection;
 import me.retucio.retchat.chat.ChatMessage;
 import me.retucio.retchat.chat.conversation.Conversation;
 import me.retucio.retchat.chat.conversation.ConversationManager;
+import me.retucio.retchat.net.SystemMessageCode;
 
 
 public class MainActivity extends AppCompatActivity implements ChatConnection.MessageListener {
@@ -149,6 +150,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         recycler = new RecyclerView(this);
         adapter = new ChatAdapter(this);
         convs = new ConversationManager();
+        convs.setActiveConversation(convs.getOrCreateRoom("lobby"));
         recycler.setLayoutManager(new LinearLayoutManager(this));
         recycler.setAdapter(adapter);
         recycler.setBackgroundColor(0xFF1A1A1A);
@@ -318,7 +320,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                     ChatMessage.Type.SELF, null, System.currentTimeMillis());
             convs.addMessageToConversation(dmConv, selfMsg);
             convs.setActiveConversation(dmConv);
-            adapter.setMessages(dmConv.messages);
+            adapter.setMessages(dmConv.messages);  // full switch — setMessages is correct here
             refreshSidePanel();
             scrollToBottom();
             new Thread(() -> {
@@ -338,7 +340,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             if (active.type == Conversation.Type.ROOM) {
                 ChatMessage selfMsg = new ChatMessage(text, ChatMessage.Type.SELF, null, System.currentTimeMillis());
                 convs.addMessageToConversation(active, selfMsg);
-                adapter.setMessages(active.messages);
+                adapter.addMessage(selfMsg);
                 scrollToBottom();
                 new Thread(() -> {
                     try {
@@ -351,7 +353,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             } else if (active.type == Conversation.Type.DM) {
                 ChatMessage selfMsg = new ChatMessage(getString(R.string.dm, text), ChatMessage.Type.SELF, null, System.currentTimeMillis());
                 convs.addMessageToConversation(active, selfMsg);
-                adapter.setMessages(active.messages);
+                adapter.addMessage(selfMsg);
                 scrollToBottom();
                 new Thread(() -> {
                     try {
@@ -391,8 +393,15 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     }
 
     @Override
-    public void onSystemMessage(String text, boolean isError) {
-        runOnUiThread(() -> addSystemMessage(text, isError));
+    public void onSystemMessage(int code, List<String> params, boolean isError) {
+        int resId = getResourceIdForCode(code);
+        String formatted;
+        if (resId != 0) {
+            formatted = getString(resId, params.toArray());
+        } else {
+            formatted = "unknown message (code " + code + ")";
+        }
+        addSystemMessage(formatted, isError);
     }
 
     @Override
@@ -402,10 +411,10 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             ChatMessage msg = new ChatMessage(text, ChatMessage.Type.OTHER, sender, System.currentTimeMillis());
             convs.addMessageToConversation(roomConv, msg);
             if (convs.getActiveConversation() == roomConv) {
-                adapter.setMessages(roomConv.messages);
+                adapter.addMessage(msg);
                 scrollToBottom();
             } else {
-                refreshSidePanel(); // update unread count in DM list (not needed for room, but room might have unread)
+                refreshSidePanel();
             }
         });
     }
@@ -458,10 +467,10 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                     ChatMessage.Type.OTHER, sender, System.currentTimeMillis());
             convs.addMessageToConversation(dmConv, msg);
             if (convs.getActiveConversation() == dmConv) {
-                adapter.setMessages(dmConv.messages);
+                adapter.addMessage(msg);
                 scrollToBottom();
             } else {
-                refreshSidePanel();  // update unread count in DM list
+                refreshSidePanel();
             }
         });
     }
@@ -490,8 +499,24 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         if (active == null) return;
         ChatMessage sysMsg = new ChatMessage(text, isError, System.currentTimeMillis());
         convs.addMessageToConversation(active, sysMsg);
-        adapter.setMessages(active.messages);
+        adapter.addMessage(sysMsg);
         scrollToBottom();
+    }
+
+    private int getResourceIdForCode(int code) {
+        return switch (code) {
+            case SystemMessageCode.MSG_WELCOME ->               R.string.msg_1;
+            case SystemMessageCode.MSG_NICK_EMPTY ->            R.string.msg_2;
+            case SystemMessageCode.MSG_NICK_TOO_LONG ->         R.string.msg_3;
+            case SystemMessageCode.MSG_NICK_INVALID_CHARS ->    R.string.msg_4;
+            case SystemMessageCode.MSG_NICK_SAME ->             R.string.msg_5;
+            case SystemMessageCode.MSG_NICK_BANNED ->           R.string.msg_6;
+            case SystemMessageCode.MSG_NICK_TAKEN ->            R.string.msg_7;
+            case SystemMessageCode.MSG_JOIN_ALREADY ->          R.string.msg_8;
+            case SystemMessageCode.MSG_JOIN_NAME_TAKEN ->       R.string.msg_9;
+            case SystemMessageCode.MSG_DM_TARGET_NOT_FOUND ->   R.string.msg_10;
+            default -> 0;
+        };
     }
 
     private void scrollToBottom() { recycler.scrollToPosition(adapter.getItemCount() - 1); }
