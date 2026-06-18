@@ -1,12 +1,15 @@
 package me.retucio.retchat;
 
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.IBinder;
 import android.provider.OpenableColumns;
 import android.view.Gravity;
 import android.view.View;
@@ -15,6 +18,7 @@ import android.view.animation.Animation;
 import android.view.animation.TranslateAnimation;
 import android.view.inputmethod.EditorInfo;
 import android.widget.*;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.GravityCompat;
@@ -23,12 +27,12 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.io.ByteArrayOutputStream;
-import java.io.EOFException;
 import java.io.InputStream;
 import java.util.List;
 
 import me.retucio.retchat.chat.ChatAdapter;
 import me.retucio.retchat.chat.ChatMessage;
+import me.retucio.retchat.chat.ChatService;
 import me.retucio.retchat.chat.conversation.Conversation;
 import me.retucio.retchat.chat.conversation.ConversationManager;
 import me.retucio.retchat.net.ChatConnection;
@@ -37,7 +41,19 @@ import me.retucio.retchat.net.SystemMessageCode;
 
 public class MainActivity extends AppCompatActivity implements ChatConnection.MessageListener {
 
-    private ChatConnection conn;
+    private ChatService service;
+    private boolean serviceBound = false;
+    private final ServiceConnection serviceConn = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            service = ((ChatService.LocalBinder) binder).getService();
+            service.setListener(MainActivity.this);
+            serviceBound = true;
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            serviceBound = false;
+        }
+    };
+
     private ChatAdapter adapter;
     private ConversationManager convs;
     private RecyclerView recycler;
@@ -75,11 +91,36 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         connectPanelExpanded = prefs.getBoolean(KEY_PANEL_EXPANDED, true);
         buildUI();
 
+        Intent svc = new Intent(this, ChatService.class);
+        startService(svc);
+        bindService(svc, serviceConn, BIND_AUTO_CREATE);
+
         String savedIp = prefs.getString(KEY_IP, "retucio.me");
         int savedPort = prefs.getInt(KEY_PORT, 6677);
         ipField.setText(savedIp);
         portField.setText(String.valueOf(savedPort));
         new Thread(() -> doConnect(savedIp, savedPort)).start();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (serviceBound) service.setListener(this);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (serviceBound) service.clearListener();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (serviceBound) {
+            unbindService(serviceConn);
+            serviceBound = false;
+        }
     }
 
     private void buildUI() {
@@ -143,7 +184,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                 return;
             }
             new Thread(() -> {
-                if (conn != null && conn.isRunning() && ip.equals(conn.getIp()) && port == conn.getPort()) {
+                if (service.isConnected() && ip.equals(service.getCurrentIp()) && port == service.getCurrentPort()) {
                     runOnUiThread(() -> addSystemMessage(getString(R.string.error_already_connected), true));
                     return;
                 }
@@ -311,7 +352,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                 byte[] finalImageBytes = imageBytes;
                 new Thread(() -> {
                     try {
-                        conn.sendImage(target, mimeType, fileName, finalImageBytes);
+                        service.sendImage(target, mimeType, fileName, finalImageBytes);
                     } catch (Exception e) {
                         runOnUiThread(() -> addSystemMessage(getString(R.string.error_send_image), true));
                     }
@@ -372,20 +413,13 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     }
 
     private void doConnect(String ip, int port) {
-        if (conn != null) conn.disconnect();
-        conn = new ChatConnection(this);
-        try {
-            conn.connect(ip, port);
-        } catch (EOFException e) {
-            runOnUiThread(() -> addSystemMessage(getString(R.string.error_EOF), true));
-        } catch (Exception e) {
-            runOnUiThread(() -> addSystemMessage(getString(R.string.error_connection, e.getMessage()), true));
-            e.printStackTrace();
-        }
+        if (service == null) return;
+        service.disconnect();
+        service.connect(ip, port);
     }
 
     private void sendMessage() {
-        if (conn == null || !conn.isRunning()) {
+        if (!service.isConnected()) {
             addSystemMessage(getString(R.string.error_not_connected), true);
             return;
         }
@@ -397,7 +431,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             String nick = text.substring(6).trim();
             new Thread(() -> {
                 try {
-                    conn.sendNick(nick);
+                    service.sendNick(nick);
                 } catch (Exception e) {
                     runOnUiThread(() -> addSystemMessage(getString(R.string.error_nick), true));
                 }
@@ -406,7 +440,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             String room = text.substring(6).trim();
             new Thread(() -> {
                 try {
-                    conn.sendJoin(room);
+                    service.sendJoin(room);
                 } catch (Exception e) {
                     runOnUiThread(() -> addSystemMessage(getString(R.string.error_join), true));
                 }
@@ -429,7 +463,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             scrollToBottom();
             new Thread(() -> {
                 try {
-                    conn.sendDm(target, dmText);
+                    service.sendDm(target, dmText);
                 } catch (Exception e) {
                     runOnUiThread(() -> addSystemMessage(getString(R.string.error_dm), true));
                 }
@@ -447,7 +481,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                 scrollToBottom();
                 new Thread(() -> {
                     try {
-                        conn.sendChat(text);
+                        service.sendChat(text);
                     } catch (Exception e) {
                         runOnUiThread(() -> addSystemMessage(getString(R.string.error_send), true));
                         e.printStackTrace();
@@ -460,7 +494,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                 scrollToBottom();
                 new Thread(() -> {
                     try {
-                        conn.sendDm(active.id, text);
+                        service.sendDm(active.id, text);
                     } catch (Exception e) {
                         runOnUiThread(() -> addSystemMessage(getString(R.string.error_dm), true));
                     }
@@ -479,11 +513,10 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         new Thread(() -> {
             try {
                 if (savedNick != null && !savedNick.isEmpty()) {
-                    conn.sendNick(savedNick);
+                    service.sendNick(savedNick);
                 }
                 if (savedRoom != null && !savedRoom.isEmpty() && !savedRoom.equals("lobby")) {
-                    Thread.sleep(200);
-                    conn.sendJoin(savedRoom);
+                    service.sendJoin(savedRoom);
                 }
             } catch (Exception ignored) {
                 // empty catch block
@@ -526,10 +559,8 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     @Override
     public void onImageMessage(String sender, String mimeType, String fileName, byte[] imageData) {
         runOnUiThread(() -> {
-            // Determine target conversation: if sender is in a DM with us, route there; else room.
             Conversation active = convs.getActiveConversation();
             Conversation targetConv = null;
-            // Check if we have a DM with this sender
             List<Conversation> dms = convs.getRecentDMs();
             for (Conversation c : dms) {
                 if (c.id.equals(sender)) {
@@ -538,7 +569,6 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
                 }
             }
             if (targetConv == null) {
-                // treat as room message
                 targetConv = convs.getOrCreateRoom(currentRoom);
             }
             ChatMessage msg = new ChatMessage("", ChatMessage.Type.OTHER, sender,
@@ -613,7 +643,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     public void onKicked(String reason) {
         runOnUiThread(() -> {
             addSystemMessage(getString(R.string.error_kicked, reason), true);
-            if (conn != null) conn.disconnect();
+            service.disconnect();
         });
     }
 
@@ -621,7 +651,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
     public void onBanned(String reason) {
         runOnUiThread(() -> {
             addSystemMessage(getString(R.string.error_banned, reason), true);
-            if (conn != null) conn.disconnect();
+            service.disconnect();
         });
     }
 
