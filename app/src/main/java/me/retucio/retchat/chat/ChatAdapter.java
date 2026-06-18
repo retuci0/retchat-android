@@ -64,7 +64,6 @@ public class ChatAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             messages.clear();
             messages.addAll(newMessages);
             notifyDataSetChanged();
-            // Scroll after layout
             if (onAfterInsert != null) {
                 activity.getRecycler().post(() -> onAfterInsert.run());
             }

@@ -51,4 +51,6 @@
     <string name="msg_9">your nick is taken in that room.</string>
     <string name="msg_10">user "%s" not found</string>
     <string name="msg_11">image type unsupported: %s</string>
+    <string name="msg_12">protocol version mismatch - server: %s; client: %s - try updating the app</string>
+
 </resources>

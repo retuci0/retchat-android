@@ -13,4 +13,5 @@ public class SystemMessageCode {
     public static final int MSG_JOIN_NAME_TAKEN     = 9;
     public static final int MSG_DM_TARGET_NOT_FOUND = 10;
     public static final int MSG_IMAGE_UNSUPPORTED   = 11;
+    public static final int MSG_VERSION_MISMATCH    = 12;
 }

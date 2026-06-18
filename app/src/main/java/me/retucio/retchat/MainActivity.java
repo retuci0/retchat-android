@@ -396,7 +396,6 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
         return fileName;
     }
 
-    // --- rest of MainActivity (unchanged except add onImageMessage) ---
 
     private void switchToConversation(Conversation conv) {
         convs.setActiveConversation(conv);
@@ -680,6 +679,7 @@ public class MainActivity extends AppCompatActivity implements ChatConnection.Me
             case SystemMessageCode.MSG_JOIN_NAME_TAKEN:        return R.string.msg_9;
             case SystemMessageCode.MSG_DM_TARGET_NOT_FOUND:    return R.string.msg_10;
             case SystemMessageCode.MSG_IMAGE_UNSUPPORTED:      return R.string.msg_11;
+            case SystemMessageCode.MSG_VERSION_MISMATCH:       return R.string.msg_12;
             default: return 0;
         }
     }

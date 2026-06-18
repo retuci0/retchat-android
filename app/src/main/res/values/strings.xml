@@ -51,4 +51,5 @@
     <string name="msg_9">tu nick ya está cogido en esa sala.</string>
     <string name="msg_10">usuario "%s" no encontrado</string>
     <string name="msg_11">tipo de imagen no soportado: %s</string>
+    <string name="msg_12">versión de protocolo no soportada - server: %s; cliente: %s - prueba a actualizar la aplicación</string>
 </resources>

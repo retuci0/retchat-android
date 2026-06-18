@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -21,6 +22,8 @@ import javax.crypto.spec.SecretKeySpec;
 
 
 public class ChatConnection {
+
+    private static final int PROTOCOL_VERSION = 1;
 
     private static final int KEEPALIVE_INTERVAL_SEC = 30;
     private static final int KEEPALIVE_TIMEOUT_SEC = 10;
@@ -75,6 +78,41 @@ public class ChatConnection {
 
     public ChatConnection(MessageListener listener) {
         this.listener = listener;
+    }
+
+    private byte[] readFrame() throws Exception {
+        byte[] recvHmac = new byte[32];
+        int hmacRead = 0;
+        while (hmacRead < 32) {
+            int r = in.read(recvHmac, hmacRead, 32 - hmacRead);
+            if (r < 0) throw new IOException("EOF while reading HMAC");
+            hmacRead += r;
+        }
+
+        int msgLen = in.readInt();
+        if (msgLen > MAX_MSG_LEN) throw new IOException("Packet too large");
+
+        byte[] ciphertext = new byte[msgLen];
+        int total = 0;
+        while (total < msgLen) {
+            int r = in.read(ciphertext, total, msgLen - total);
+            if (r < 0) throw new IOException("EOF while reading ciphertext");
+            total += r;
+        }
+
+        // verify HMAC
+        Mac hmac = Mac.getInstance("HmacSHA256");
+        SecretKeySpec keySpec = new SecretKeySpec(encKey, "HmacSHA256");
+        hmac.init(keySpec);
+        byte[] expected = hmac.doFinal(ciphertext);
+        if (!MessageDigest.isEqual(recvHmac, expected)) {
+            throw new SecurityException("HMAC mismatch");
+        }
+
+        long counter = recvCounter;
+        recvCounter++;
+        xorCrypt(ciphertext, counter);
+        return ciphertext;
     }
 
     // --- DH ---
@@ -136,6 +174,7 @@ public class ChatConnection {
         out = socket.getOutputStream();
         in = new DataInputStream(socket.getInputStream());
 
+        // DH exchange
         BigInteger clientPriv = generatePrivateKey();
         BigInteger clientPub = computePublicKey(clientPriv);
 
@@ -155,12 +194,46 @@ public class ChatConnection {
 
         sendCounter = 0;
         recvCounter = 0;
+
+        // read handshake
+        byte[] plain;
+        try {
+            plain = readFrame();
+        } catch (Exception e) {
+            listener.onDisconnected();
+            return;
+        }
+
+        int type = plain[0] & 0xFF;
+        if (type != PacketType.HANDSHAKE || plain.length != 3) {
+            disconnect();
+            listener.onDisconnected();
+            return;
+        }
+        int serverVersion = ((plain[1] & 0xFF) << 8) | (plain[2] & 0xFF);
+        if (serverVersion != PROTOCOL_VERSION) {
+            List<String> params = Arrays.asList(
+                    String.valueOf(PROTOCOL_VERSION),
+                    String.valueOf(serverVersion)
+            );
+            listener.onSystemMessage(SystemMessageCode.MSG_VERSION_MISMATCH, params, true);
+            disconnect();
+            listener.onDisconnected();
+            return;
+        }
+
+        // send handshake
+        running = true;
+        byte[] versionPayload = new byte[] {
+                (byte)((PROTOCOL_VERSION >> 8) & 0xFF),
+                (byte)(PROTOCOL_VERSION & 0xFF)
+        };
+        sendPacket(PacketType.HANDSHAKE, versionPayload);
+
+        // handshake successful
         lastReceiveTime = System.currentTimeMillis();
         waitingForAck = false;
-        running = true;
-
         startKeepAlive();
-
         new Thread(this::receiveLoop).start();
         listener.onConnected();
     }
@@ -269,56 +342,24 @@ public class ChatConnection {
     private void receiveLoop() {
         try {
             while (running) {
-                byte[] recvHmac = new byte[32];
-                int hmacRead = 0;
-                while (hmacRead < 32) {
-                    int r = in.read(recvHmac, hmacRead, 32 - hmacRead);
-                    if (r < 0) break;
-                    hmacRead += r;
-                }
-                if (hmacRead != 32) break;
-
-                int msgLen = in.readInt();
-                if (msgLen > MAX_MSG_LEN) break;
-                byte[] ciphertext = new byte[msgLen];
-                int total = 0;
-                while (total < msgLen) {
-                    int r = in.read(ciphertext, total, msgLen - total);
-                    if (r < 0) break;
-                    total += r;
-                }
-                if (total != msgLen) break;
-
-                Mac hmac = Mac.getInstance("HmacSHA256");
-                SecretKeySpec keySpec = new SecretKeySpec(encKey, "HmacSHA256");
-                hmac.init(keySpec);
-                byte[] expected = hmac.doFinal(ciphertext);
-
-                if (!MessageDigest.isEqual(recvHmac, expected)) {
-                    Log.e("ChatConnection", "HMAC verification failed, disconnecting");
-                    break;
-                }
-
-                long counter = recvCounter;
-                recvCounter++;
+                byte[] plain = readFrame();
+                handlePacket(plain);
                 resetIdleTimer();
-                xorCrypt(ciphertext, counter);
-
-                byte type = ciphertext[0];
-                byte[] payload = new byte[ciphertext.length - 1];
-                System.arraycopy(ciphertext, 1, payload, 0, payload.length);
-                handlePacket(type, payload);
             }
         } catch (Exception e) {
-            e.printStackTrace();
+            // connection lost
         } finally {
             running = false;
             listener.onDisconnected();
         }
     }
 
-    private void handlePacket(byte type, byte[] payload) {
+    private void handlePacket(byte[] packet) {
+        if (packet.length == 0) return;
+        byte type = packet[0];
+        byte[] payload = Arrays.copyOfRange(packet, 1, packet.length);
         int[] offset = { 0 };
+
         switch (type) {
             case PacketType.KEEPALIVE: {
                 try {
